@@ -3,6 +3,7 @@ package storedcounter
 import (
 	"context"
 	"encoding/binary"
+	"golang.org/x/xerrors"
 	"sync"
 
 	"github.com/ipfs/go-datastore"
@@ -45,4 +46,52 @@ func (sc *StoredCounter) Next() (uint64, error) {
 	size := binary.PutUvarint(buf, next)
 
 	return next, sc.ds.Put(ctx, sc.name, buf[:size])
+}
+
+// Get current Sector Number
+func (sc *StoredCounter) Get() (uint64, error) {
+	ctx := context.TODO()
+	sc.lock.Lock()
+	defer sc.lock.Unlock()
+	has, err := sc.ds.Has(ctx, sc.name)
+	if err != nil {
+		return 0, err
+	}
+
+	if !has {
+		return 0, nil
+	}
+
+	curBytes, err := sc.ds.Get(ctx, sc.name)
+	if err != nil {
+		return 0, err
+	}
+	cur, _ := binary.Uvarint(curBytes)
+	return cur, nil
+}
+
+// Set the next counter value, updating it on disk in the process
+func (sc *StoredCounter) Set(number uint64) error {
+	ctx := context.TODO()
+	sc.lock.Lock()
+	defer sc.lock.Unlock()
+	has, err := sc.ds.Has(ctx, sc.name)
+	if err != nil {
+		return err
+	}
+
+	if has {
+		curBytes, err := sc.ds.Get(ctx, sc.name)
+		if err != nil {
+			return err
+		}
+		cur, _ := binary.Uvarint(curBytes)
+		if cur > number {
+			return xerrors.Errorf("Number %d should not less than current SectorID %d", number, cur)
+		}
+	}
+
+	buf := make([]byte, binary.MaxVarintLen64)
+	size := binary.PutUvarint(buf, number)
+	return sc.ds.Put(ctx, sc.name, buf[:size])
 }
